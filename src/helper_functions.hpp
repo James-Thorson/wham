@@ -109,6 +109,52 @@ Type ddirichlet(vector<Type> obs, vector<Type>p, Type phi, int do_log)
   else return exp(ll);
 }
 
+// multivariate-Tweedie
+template<class Type>
+Type dmvtweedie( vector<Type> x, vector<Type> prob, Type phi, Type power, int give_log=0 ){
+
+  // Pre-processing
+  int n_c = x.size();
+  vector<Type> p_exp(n_c);
+  vector<Type> p_obs(n_c);
+  Type Ntotal = x.sum();
+  p_exp = prob / prob.sum();
+
+  Type logres = 0;
+  for( int c=0; c<n_c; c++){
+    // dtweedie( Type y, Type mu, Type phi, Type p, int give_log=0 )
+    logres += dtweedie( x(c), p_exp(c)*Ntotal, phi, power, true );
+  }
+
+  if(give_log) return logres; else return exp(logres);
+}
+
+// Simulate from tweedie
+// Adapted from tweedie::rtweedie function in R
+template<class Type>
+Type rTweedie( Type mu, Type phi, Type power){
+ Type lambda = pow(mu, Type(2.0) - power) / (phi * (Type(2.0) - power));
+ Type alpha = (Type(2.0) - power) / (Type(1.0) - power);
+ Type gam = phi * (power - Type(1.0)) * pow(mu, power - Type(1.0));
+ Type N = rpois(lambda);
+ Type B = rgamma(-N * alpha, gam);   /// Using Shape-Scale parameterization
+ return B;
+}
+
+template<class Type>
+vector<Type> rmvtweedie( Type N, vector<Type> p, Type phi, Type power)
+{
+  int Nint = CppAD::Integer(N);
+  int dim = p.size();
+  vector<Type> obs(dim);
+  //obs.setZero();
+  for(int i = 0; i < dim; i++)
+  {
+    obs(i) = rTweedie( N*p(i), phi, power );
+  }
+  return(obs);
+}
+
 template<class Type>
 Type ddirmultinom(vector<Type> obs, vector<Type> p,  Type phi, int do_log)
 {
@@ -134,7 +180,6 @@ Type ddirmultinom_osa(vector<Type> obs, vector<Type> p,  Type phi, int do_log, v
 template<class Type>
 vector<Type> rdirmultinom(Type N, vector<Type> p, Type phi) //dirichlet generated from iid gammas
 {
-  //int Nint = CppAD::Integer(N);
   vector<Type> dp = rdirichlet(p, phi);
   vector<Type> obs = rmultinom(N,dp);
   return(obs);
@@ -305,6 +350,11 @@ Type get_acomp_ll(int year, int n_ages, Type Neff, int age_comp_model, vector<Ty
       }
     }
     ll -= log(pos_obs_l); //add in the last observed age class(es).
+  }
+  if(age_comp_model == 8) //mvtweedie
+  {
+    vector<Type> temp_n = Neff * paa_obs;
+    ll = dmvtweedie(temp_n, paa_pred, exp(age_comp_pars(0)), Type(1.0)+invlogit(age_comp_pars(1)), 1);
   }
   return ll;
 }
@@ -645,6 +695,12 @@ vector<Type> sim_acomp(Type Neff, int age_comp_model, vector<Type> paa_obs, vect
         k++;
       }
     }
+  }
+  if(age_comp_model == 8) // multivariate-Tweedie
+  {
+    //int N = CppAD::Integer(Neff);
+    obs = rmvtweedie( Neff, paa_pred, exp(age_comp_pars(0)), Type(1.0)+invlogit(age_comp_pars(1)) );
+    obs = obs/obs.sum();// proportions
   }
   return obs;
 }
